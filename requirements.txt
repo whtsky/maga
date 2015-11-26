@@ -1,0 +1,2 @@
+cchardet==1.0.0
+Cython==0.23.4
