@@ -11,7 +11,10 @@ setup(
     license='BSDv3',
     platforms='any',
     zip_safe=False,
-    keywords=['dht', 'asyncio', 'crawler'],
+    include_package_data=True,
+    py_modules=['maga'],
+    install_requires=open("requirements.txt").readlines(),
+    keywords=['dht', 'asyncio', 'crawler', 'bt', 'kad'],
     classifiers=[
         'Environment :: Other Environment',
         'Intended Audience :: Developers',
