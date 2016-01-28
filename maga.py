@@ -1,13 +1,39 @@
+import asyncio
+import binascii
+import os
 import signal
 
+from socket import inet_ntoa
+from struct import unpack
+
 import bencoder
-import asyncio
-import logging
-
-from utils import generate_byte_string, generate_node_id, split_nodes, proper_infohash
 
 
-TOKEN_LENGTH = 2
+def proper_infohash(infohash):
+    if isinstance(infohash, bytes):
+        # Convert bytes to hex
+        infohash = binascii.hexlify(infohash).decode('utf-8')
+    return infohash.upper()
+
+
+def random_node_id(size=20):
+    return os.urandom(size)
+
+
+def split_nodes(nodes):
+    length = len(nodes)
+    if (length % 26) != 0:
+        return
+
+    for i in range(0, length, 26):
+        nid = nodes[i:i+20]
+        ip = inet_ntoa(nodes[i+20:i+24])
+        port = unpack("!H", nodes[i+24:i+26])[0]
+        yield nid, ip, port
+
+
+__version__ = '1.0.0'
+
 
 BOOTSTRAP_NODES = (
     ("router.bittorrent.com", 6881),
@@ -17,33 +43,39 @@ BOOTSTRAP_NODES = (
 
 
 class Maga(asyncio.DatagramProtocol):
-    def __init__(self, handler, loop=None, bootstrap_nodes=BOOTSTRAP_NODES):
-        self.node_id = generate_node_id()
+    def __init__(self, loop=None, bootstrap_nodes=BOOTSTRAP_NODES, interval=1):
+        self.node_id = random_node_id()
         self.transport = None
         self.loop = loop or asyncio.get_event_loop()
         self.bootstrap_nodes = bootstrap_nodes
-        self.handler = handler
         self.__running = False
+        self.interval = interval
+
+    def stop(self):
+        self.__running = False
+        self.loop.call_later(self.interval, self.loop.stop)
+
+    async def auto_find_nodes(self):
+        self.__running = True
+        while self.__running:
+            await asyncio.sleep(self.interval)
+            for node in self.bootstrap_nodes:
+                self.find_node(addr=node)
 
     def run(self, port=6881):
-        coro = self.loop.create_datagram_endpoint(lambda: self, local_addr=('0.0.0.0', port))
+        coro = self.loop.create_datagram_endpoint(
+                lambda: self, local_addr=('0.0.0.0', port)
+        )
         transport, _ = self.loop.run_until_complete(coro)
 
-        self.bootstrap()
-        async def beep():
-            while self.__running:
-                await asyncio.sleep(1)
-                for node in self.bootstrap_nodes:
-                    self.send_find_node_message(addr=node)
-
-        def stop():
-            self.__running = False
-            self.loop.stop()
-
-        asyncio.ensure_future(beep(), loop=self.loop)
         for signame in ('SIGINT', 'SIGTERM'):
-            self.loop.add_signal_handler(getattr(signal, signame), stop)
+            self.loop.add_signal_handler(getattr(signal, signame), self.stop)
 
+        for node in self.bootstrap_nodes:
+            # Bootstrap
+            self.find_node(addr=node, node_id=self.node_id)
+
+        asyncio.ensure_future(self.auto_find_nodes(), loop=self.loop)
         self.loop.run_forever()
         self.loop.close()
 
@@ -52,18 +84,19 @@ class Maga(asyncio.DatagramProtocol):
             msg = bencoder.bdecode(data)
         except:
             return
-
         try:
             self.handle_message(msg, addr)
-        except:
+        except Exception as e:
             self.send_message(data={
                 "t": msg["t"],
                 "y": "e",
                 "e": [202, "Server Error"]
             }, addr=addr)
+            raise e
 
     def handle_message(self, msg, addr):
         msg_type = msg.get(b"y", b"e")
+
         if msg_type == b"e":
             return
 
@@ -79,18 +112,20 @@ class Maga(asyncio.DatagramProtocol):
         args = msg[b"r"]
         if b"nodes" in args:
             for node_id, ip, port in split_nodes(args[b"nodes"]):
-                self.send_find_node_message(
-                    addr=(ip, port),
-                    node_id=node_id
-                )
+                self.ping(addr=(ip, port))
 
     async def handle_query(self, msg, addr):
         args = msg[b"a"]
         node_id = args[b"id"]
         query_type = msg[b"q"]
         if query_type == b"get_peers":
-            infohash = proper_infohash(args[b"info_hash"])
-            token = infohash[:TOKEN_LENGTH]
+            infohash = args[b"info_hash"]
+            self.send_message({
+                "id": self.fake_node_id(node_id),
+                "info_hash": infohash
+            }, addr=addr)
+            infohash = proper_infohash(infohash)
+            token = infohash[:2]
             self.send_message({
                 "t": msg[b"t"],
                 "y": "r",
@@ -102,6 +137,12 @@ class Maga(asyncio.DatagramProtocol):
             }, addr=addr)
             await self.handler(infohash)
         elif query_type == b"announce_peer":
+            infohash = args[b"info_hash"]
+            self.send_message({
+                "id": self.fake_node_id(node_id),
+                "info_hash": infohash
+            }, addr=addr)
+
             tid = msg[b"t"]
             self.send_message({
                 "t": tid,
@@ -110,8 +151,7 @@ class Maga(asyncio.DatagramProtocol):
                     "id": self.fake_node_id(node_id)
                 }
             }, addr=addr)
-            infohash = proper_infohash(args[b"info_hash"])
-            await self.handler(infohash)
+            await self.handler(proper_infohash(infohash))
         elif query_type == b"find_node":
             tid = msg[b"t"]
             self.send_message({
@@ -122,10 +162,17 @@ class Maga(asyncio.DatagramProtocol):
                     "nodes": ""
                 }
             }, addr=addr)
+            self.find_node(addr=addr, node_id=node_id)
         elif query_type == b"ping":
-            self.pong_node(addr=addr, node_id=node_id)
+            self.send_message({
+                "t": b"tt",
+                "y": "r",
+                "r": {
+                    "id": self.fake_node_id(node_id)
+                }
+            }, addr=addr)
 
-    def ping_node(self, addr, node_id=None):
+    def ping(self, addr, node_id=None):
         self.send_message({
             "y": "q",
             "t": "pg",
@@ -135,41 +182,27 @@ class Maga(asyncio.DatagramProtocol):
             }
         }, addr=addr)
 
-    def bootstrap(self):
-        for node in self.bootstrap_nodes:
-            self.send_find_node_message(addr=node, target=self.node_id)
-
     def connection_made(self, transport):
         self.transport = transport
 
     def connection_lost(self, exc):
-        self.transport.close()
         self.__running = False
+        self.transport.close()
 
     def send_message(self, data, addr):
-        if "t" not in data:
-            data["t"] = generate_byte_string(2)
+        data.setdefault("t", b"tt")
         self.transport.sendto(bencoder.bencode(data), addr)
-
-    def pong_node(self, addr, node_id):
-        self.send_message({
-            "t": generate_byte_string(2),
-            "y": "r",
-            "r": {
-                "id": self.fake_node_id(node_id)
-            }
-        }, addr=addr)
 
     def fake_node_id(self, node_id=None):
         if node_id:
-            return node_id[:-3]+self.node_id[-3:]
+            return node_id[:-1]+self.node_id[-1:]
         return self.node_id
 
-    def send_find_node_message(self, addr, node_id=None, target=None, t=b"fn"):
+    def find_node(self, addr, node_id=None, target=None):
         if not target:
-            target = generate_node_id()
+            target = random_node_id()
         self.send_message({
-            "t": t,
+            "t": b"fn",
             "y": "q",
             "q": "find_node",
             "a": {
@@ -178,8 +211,5 @@ class Maga(asyncio.DatagramProtocol):
             }
         }, addr=addr)
 
-
-if __name__ == "__main__":
-    async def infohash_handler(infohash):
-        logging.info(infohash)
-    Maga(infohash_handler).run(6881)
+    async def handler(self, infohash):
+        raise NotImplementedError()
