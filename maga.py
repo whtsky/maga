@@ -32,7 +32,7 @@ def split_nodes(nodes):
         yield nid, ip, port
 
 
-__version__ = '1.0.0'
+__version__ = '1.1.0'
 
 
 BOOTSTRAP_NODES = (
@@ -120,10 +120,6 @@ class Maga(asyncio.DatagramProtocol):
         query_type = msg[b"q"]
         if query_type == b"get_peers":
             infohash = args[b"info_hash"]
-            self.send_message({
-                "id": self.fake_node_id(node_id),
-                "info_hash": infohash
-            }, addr=addr)
             infohash = proper_infohash(infohash)
             token = infohash[:2]
             self.send_message({
@@ -138,11 +134,6 @@ class Maga(asyncio.DatagramProtocol):
             await self.handler(infohash)
         elif query_type == b"announce_peer":
             infohash = args[b"info_hash"]
-            self.send_message({
-                "id": self.fake_node_id(node_id),
-                "info_hash": infohash
-            }, addr=addr)
-
             tid = msg[b"t"]
             self.send_message({
                 "t": tid,
@@ -162,7 +153,6 @@ class Maga(asyncio.DatagramProtocol):
                     "nodes": ""
                 }
             }, addr=addr)
-            self.find_node(addr=addr, node_id=node_id)
         elif query_type == b"ping":
             self.send_message({
                 "t": b"tt",
@@ -171,6 +161,7 @@ class Maga(asyncio.DatagramProtocol):
                     "id": self.fake_node_id(node_id)
                 }
             }, addr=addr)
+        self.find_node(addr=addr, node_id=node_id)
 
     def ping(self, addr, node_id=None):
         self.send_message({

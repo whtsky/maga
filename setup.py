@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='Maga',
-    version='1.0.0',
+    version='1.1.0',
     description='A DHT crawler framework using asyncio.',
     long_description=open('README.rst', 'r').read(),
     author='whtsky',
