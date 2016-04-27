@@ -32,7 +32,7 @@ def split_nodes(nodes):
         yield nid, ip, port
 
 
-__version__ = '1.1.0'
+__version__ = '2.0.0'
 
 
 BOOTSTRAP_NODES = (
@@ -131,7 +131,7 @@ class Maga(asyncio.DatagramProtocol):
                     "token": token
                 }
             }, addr=addr)
-            await self.handler(infohash)
+            await self.handle_get_peers(infohash, addr)
         elif query_type == b"announce_peer":
             infohash = args[b"info_hash"]
             tid = msg[b"t"]
@@ -202,5 +202,11 @@ class Maga(asyncio.DatagramProtocol):
             }
         }, addr=addr)
 
-    async def handler(self, infohash):
+    async def handle_get_peers(self, infohash, addr):
+        await self.handler(infohash, addr)
+
+    async def handle_announce_peer(self, infohash, addr):
+        await self.handler(infohash, addr)
+
+    async def handler(self, infohash, addr):
         raise NotImplementedError()

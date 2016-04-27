@@ -1,3 +1,1 @@
-Cython
-
-bencoder.pyx==1.0.0
+bencoder.pyx>=1.1.1
