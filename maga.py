@@ -142,7 +142,7 @@ class Maga(asyncio.DatagramProtocol):
                     "id": self.fake_node_id(node_id)
                 }
             }, addr=addr)
-            await self.handler(proper_infohash(infohash))
+            await self.handle_announce_peer(proper_infohash(infohash), addr)
         elif query_type == b"find_node":
             tid = msg[b"t"]
             self.send_message({
