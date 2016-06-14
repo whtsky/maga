@@ -69,7 +69,11 @@ class Maga(asyncio.DatagramProtocol):
         transport, _ = self.loop.run_until_complete(coro)
 
         for signame in ('SIGINT', 'SIGTERM'):
-            self.loop.add_signal_handler(getattr(signal, signame), self.stop)
+            try:
+                self.loop.add_signal_handler(getattr(signal, signame), self.stop)
+            except NotImplementedError:
+                # SIGINT and SIGTERM are not implemented on windows
+                pass
 
         for node in self.bootstrap_nodes:
             # Bootstrap
