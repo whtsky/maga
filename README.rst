@@ -28,7 +28,7 @@ Usage
             logging.info(addr)
             logging.info(infohash)
 
-        async def handle_announce_peer(self, infohash, addr):
+        async def handle_announce_peer(self, infohash, addr, peer_addr):
             logging.info(addr)
             logging.info(infohash)
 
@@ -40,8 +40,14 @@ Usage
 ChangeLog
 ----------
 
+Version 3.0.0
+~~~~~~~~~~~~~~~
+
++ Add `peer_addr` param to `handle_announce_peer` method.
++ Don't raise NotImplementedError on `handler`
+
 Version 2.0.0
 ~~~~~~~~~~~~~~~
 
-+ Add `handle_get_peers`, `handle_announce_peer` function.
-+ Add `addr` param in `handler`
++ Add `handle_get_peers`, `handle_announce_peer` method.
++ Add `addr` param to `handler`
